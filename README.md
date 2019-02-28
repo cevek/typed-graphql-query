@@ -1,0 +1,1 @@
+# typed-graphql-query

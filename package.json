@@ -1,0 +1,25 @@
+{
+    "name": "typed-graphql-query",
+    "version": "1.0.1",
+    "description": "",
+    "main": "dist/index",
+    "types": "dist/index",
+    "scripts": {
+        "test": "",
+        "prepublishOnly": "rm -rf dist && tsc"
+    },
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/cevek/typed-graphql-query"
+    },
+    "keywords": [],
+    "author": "cevek",
+    "files": [
+        "**/*.js",
+        "**/*.d.ts"
+    ],
+    "license": "ISC",
+    "dependencies": {
+        "typescript": ">3.0.0"
+    }
+}

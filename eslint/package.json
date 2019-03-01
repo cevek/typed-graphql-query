@@ -1,0 +1,22 @@
+{
+    "name": "eslint-plugin-typed-graphql-query",
+    "version": "1.0.1",
+    "description": "",
+    "main": "dist/eslint/index.js",
+    "scripts": {
+        "test": "ts-node ./test.ts",
+        "prepublishOnly": "rm -rf dist && tsc"
+    },
+    "files": [
+        "**/*.js"
+    ],
+    "keywords": [],
+    "author": "cevek",
+    "license": "ISC",
+    "dependencies": {
+        "@types/eslint": ">4.0.0",
+        "@types/estree": ">0.0.0",
+        "eslint": ">5.0.0",
+        "typescript": ">3.0.0"
+    }
+}

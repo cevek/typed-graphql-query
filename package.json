@@ -1,9 +1,9 @@
 {
     "name": "typed-graphql-query",
-    "version": "1.0.1",
+    "version": "1.0.2",
     "description": "",
-    "main": "dist/index",
-    "types": "dist/index",
+    "main": "dist/src/index",
+    "types": "dist/src/index",
     "scripts": {
         "test": "",
         "prepublishOnly": "rm -rf dist && tsc"

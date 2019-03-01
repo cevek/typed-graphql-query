@@ -1,12 +1,20 @@
 import * as ts_module from 'typescript/lib/tsserverlibrary';
+import {names} from '../common/names';
+import {findUnusedProps} from '../common/findUnusedProps';
 
-const maybeName = 'maybe';
-const constraintName = 'GraphQLJSONConstraint';
-const libName = 'typed-graphql-query';
 declare module 'typescript/lib/tsserverlibrary' {
     function getTokenAtPosition(sf: ts.SourceFile, position: number): ts.Node;
     interface TypeChecker {
         isArrayLikeType(arrayType: ts.Type): arrayType is ts.TypeReference;
+    }
+    namespace FindAllReferences {
+        export function findReferencedSymbols(
+            program: ts.Program,
+            cancellationToken: ts.CancellationToken,
+            sourceFiles: ReadonlyArray<ts.SourceFile>,
+            sourceFile: ts.SourceFile,
+            position: number,
+        ): ts.ReferencedSymbol[] | undefined;
     }
 }
 
@@ -23,7 +31,7 @@ function init(modules: {typescript: typeof ts_module}) {
         }
         function typeToString(type: ts.Type, checker: ts.TypeChecker): string {
             if (type !== type.getNonNullableType())
-                return maybeName + '(' + typeToString(type.getNonNullableType(), checker) + ')';
+                return names.maybeName + '(' + typeToString(type.getNonNullableType(), checker) + ')';
             if (type.flags & ts.TypeFlags.NumberLike) return '0';
             if (type.flags & ts.TypeFlags.StringLike) return "''";
             if (type.flags & ts.TypeFlags.BooleanLike) return 'true';
@@ -99,90 +107,18 @@ function init(modules: {typescript: typeof ts_module}) {
         proxy.getSemanticDiagnostics = fileName => {
             const res = info.languageService.getSemanticDiagnostics(fileName);
             const program = info.project.getLanguageService().getProgram()!;
-            const checker = program.getTypeChecker();
-            const files = program.getSourceFiles();
-
-            function visitor(node: ts.Node) {
-                if (ts.isCallExpression(node) && node.arguments && node.arguments.length === 1) {
-                    const arg = node.arguments[0];
-                    if (ts.isObjectLiteralExpression(arg)) {
-                        const signature = checker.getResolvedSignature(node);
-                        if (
-                            signature &&
-                            signature.declaration &&
-                            ts.isFunctionDeclaration(signature.declaration) &&
-                            signature.declaration.typeParameters &&
-                            signature.declaration.typeParameters.length === 1
-                        ) {
-                            const constraint = signature.declaration.typeParameters[0].constraint;
-                            if (
-                                constraint &&
-                                ts.isTypeReferenceNode(constraint) &&
-                                ts.isIdentifier(constraint.typeName) &&
-                                constraint.typeName.text === constraintName
-                            ) {
-                                const fileName = node.getSourceFile().fileName;
-                                arg.properties.forEach(prop => {
-                                    if (!prop.name) return;
-                                    const refSymbols = info.languageService.findReferences(
-                                        fileName,
-                                        prop.name.getStart(),
-                                    );
-                                    if (refSymbols) {
-                                        const hasUsage = refSymbols.some(refSymbol => {
-                                            return refSymbol.references.some(ref => {
-                                                // if (ref.isDefinition || ref.isInString) return;
-                                                if (ref.textSpan.start === prop.pos) return false;
-                                                const sourceFile = program.getSourceFile(ref.fileName);
-                                                if (sourceFile) {
-                                                    const token = ts.getTokenAtPosition(sourceFile, ref.textSpan.start);
-                                                    if (
-                                                        token &&
-                                                        token.parent &&
-                                                        ts.isIdentifier(token) &&
-                                                        ts.isPropertyAccessExpression(token.parent)
-                                                    ) {
-                                                        return true;
-                                                    }
-                                                }
-                                                return false;
-                                            });
-                                        });
-                                        if (!hasUsage) {
-                                            const diagnostic: ts.Diagnostic = {
-                                                category: ts.DiagnosticCategory.Warning,
-                                                code: 0,
-                                                file: node.getSourceFile(),
-                                                messageText: `Unused property "${prop.name.getText()}"`,
-                                                start: prop.name.getStart(),
-                                                length: prop.name.getEnd() - prop.name.getStart(),
-                                            };
-                                            const alreadyHasDiagnostic = res.some(
-                                                diag =>
-                                                    diag.messageText === diagnostic.messageText &&
-                                                    diag.start === diagnostic.start &&
-                                                    diag.file === diagnostic.file,
-                                            );
-                                            if (alreadyHasDiagnostic) return;
-                                            res.push(diagnostic);
-                                        }
-                                    }
-                                });
-                            }
-                        }
-                    }
-                }
-                ts.forEachChild(node, visitor);
-            }
-            // files.forEach(file => {
-            //     if (file.isDeclarationFile) return;
-            //     visitor(file);
-            // });
-            const sourceFile = program.getSourceFile(fileName);
-            if (sourceFile && !sourceFile.isDeclarationFile) {
-                visitor(sourceFile);
-            }
-            return res;
+            const unusedIdents = findUnusedProps(program, [program.getSourceFile(fileName)!]);
+            return [
+                ...res,
+                ...unusedIdents.map<ts.Diagnostic>(ident => ({
+                    category: ts.DiagnosticCategory.Warning,
+                    code: 0,
+                    file: ident.getSourceFile(),
+                    messageText: `Unused property "${ident.getText()}"`,
+                    start: ident.getStart(),
+                    length: ident.getEnd() - ident.getStart(),
+                })),
+            ];
         };
 
         proxy.getCompletionEntryDetails = (fileName, position, name, formatOptions, source, preferences) => {
@@ -213,11 +149,11 @@ function init(modules: {typescript: typeof ts_module}) {
                         Boolean(
                             ts.isImportDeclaration(st) &&
                                 ts.isStringLiteral(st.moduleSpecifier) &&
-                                st.moduleSpecifier.text === libName &&
+                                st.moduleSpecifier.text === names.libName &&
                                 st.importClause &&
                                 st.importClause.namedBindings &&
                                 ts.isNamedImports(st.importClause.namedBindings) &&
-                                st.importClause.namedBindings.elements.some(el => el.name.text === maybeName),
+                                st.importClause.namedBindings.elements.some(el => el.name.text === names.maybeName),
                         ),
                     );
                 return {
@@ -237,7 +173,7 @@ function init(modules: {typescript: typeof ts_module}) {
                                         ...(insertMaybe && !hasImportedMaybe
                                             ? [
                                                   {
-                                                      newText: `import {maybe} from '${libName}';\n`,
+                                                      newText: `import {maybe} from '${names.libName}';\n`,
                                                       span: {
                                                           start: 0,
                                                           length: 0,

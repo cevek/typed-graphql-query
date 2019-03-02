@@ -1,6 +1,6 @@
 {
     "name": "typed-graphql-query",
-    "version": "1.0.2",
+    "version": "1.0.6",
     "description": "",
     "main": "dist/src/index",
     "types": "dist/src/index",
@@ -15,8 +15,9 @@
     "keywords": [],
     "author": "cevek",
     "files": [
-        "**/*.js",
-        "**/*.d.ts"
+        "*.js",
+        "dist/**/*.js",
+        "dist/**/*.d.ts"
     ],
     "license": "ISC",
     "dependencies": {

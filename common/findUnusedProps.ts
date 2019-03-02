@@ -22,14 +22,14 @@ export function findUnusedProps(program: ts.Program, files: ts.SourceFile[]) {
     const res: ts.Identifier[] = [];
 
     function visitor(node: ts.Node) {
-        if (ts.isCallExpression(node) && node.arguments && node.arguments.length === 1) {
-            const arg = node.arguments[0];
-            if (ts.isObjectLiteralExpression(arg)) {
+        if (ts.isCallExpression(node) && node.arguments && node.arguments.length === 2) {
+            const arg = node.arguments[1];
+            if (ts.isObjectLiteralExpression(node.arguments[0]) && ts.isObjectLiteralExpression(arg)) {
                 const signature = checker.getResolvedSignature(node);
                 if (
                     signature &&
                     signature.declaration &&
-                    ts.isFunctionDeclaration(signature.declaration) &&
+                    ts.isFunctionLike(signature.declaration) &&
                     signature.declaration.typeParameters &&
                     signature.declaration.typeParameters.length === 1
                 ) {

@@ -79,7 +79,10 @@ function init(modules: {typescript: typeof ts_module}) {
                     if (queryObject && ts.isObjectLiteralExpression(queryObject) && queryObject.parent) {
                         result.queryObject = queryObject;
                         const type = checker.getContextualType(
-                            ts.isCallExpression(queryObject.parent) ? queryObject.parent : queryObject,
+                            ts.isCallExpression(queryObject.parent) &&
+                                ts.isObjectLiteralExpression(queryObject.parent.parent)
+                                ? queryObject.parent
+                                : queryObject,
                         );
                         const nonNullType = type && type.getNonNullableType();
                         if (nonNullType && nonNullType.isUnion()) {

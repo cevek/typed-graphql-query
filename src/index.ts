@@ -1,23 +1,39 @@
-type MakeNeverNonExistsKeys<T, Entity> = {
-    [P in keyof T]: P extends keyof Entity
-        ? (undefined extends Entity[P]
-              ? undefined extends T[P]
-                  ? MakeNeverNonExistsKeys<T[P], NonNullable<Entity[P]>>
-                  : 'should be undefined union'
-              : MakeNeverNonExistsKeys<T[P], NonNullable<Entity[P]>>)
-        : (P extends '__args' ? {} : "Property doesn't exist")
-};
-
-export type GraphQLJSONConstraint<T, Entity> = MakeNeverNonExistsKeys<T, NonNullable<Entity>>;
-
 export function maybe<T>(val: T): T | undefined {
     return val;
+}
+
+export function union<Union, A, B>(union: Union, a: A | Union, b: B | Union): A | B;
+export function union<Union, A, B, C>(union: Union, a: A | Union, b: B | Union, c: C | Union): A | B | C;
+export function union<Union, A, B, C, D>(
+    union: Union,
+    a: A | Union,
+    b: B | Union,
+    c: C | Union,
+    d: D | Union,
+): A | B | C | D;
+export function union<Union, A, B, C, D, E>(
+    union: Union,
+    a: A | Union,
+    b: B | Union,
+    c: C | Union,
+    d: D | Union,
+    e: E | Union,
+): A | B | C | D | E;
+export function union<Union, T extends {__typename: string}>(union: Union, ...types: T[]): T | Union {
+    const obj = {} as {[typename: string]: {}};
+    for (let i = 0; i < types.length; i++) {
+        const type = types[i];
+        if (type.__typename !== undefined) {
+            obj[type.__typename] = type;
+        }
+    }
+    return ({__on: obj} as unknown) as T | Union;
 }
 
 type IsUndefined<T> = undefined extends T ? undefined : never;
 export type TransformMethods<T> = {
     [K in keyof T]: T[K] extends (args: infer Args) => infer Entity
-        ? <Query extends GraphQLJSONConstraint<Query, Entity>>(args: Args, query: Query | Entity) => Query | IsUndefined<Entity>
+        ? <Query>(args: Args, query: Query | Entity) => Query | IsUndefined<Entity>
         : never
 };
 

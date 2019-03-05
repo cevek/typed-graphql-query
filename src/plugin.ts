@@ -1,4 +1,5 @@
-import * as ts_module from 'typescript/lib/tsserverlibrary';
+import * as tsServer from 'typescript/lib/tsserverlibrary';
+import * as ts from 'typescript';
 import {names} from '../common/names';
 import {findUnusedProps} from '../common/findUnusedProps';
 
@@ -18,10 +19,17 @@ declare module 'typescript/lib/tsserverlibrary' {
     }
 }
 
-function init(modules: {typescript: typeof ts_module}) {
-    const ts = modules.typescript;
+function getTypeDeclaration(type: ts.Type | undefined) {
+    return (type && getSymbolDeclaration(type.symbol || type.aliasSymbol)) || undefined;
+}
+function getSymbolDeclaration(symbol: ts.Symbol | undefined) {
+    return (symbol && symbol.declarations && symbol.declarations.length > 0 && symbol.declarations[0]) || undefined;
+}
 
-    function create(info: ts.server.PluginCreateInfo) {
+function init(modules: {}) {
+    // const ts = modules.typescript;
+
+    function create(info: tsServer.server.PluginCreateInfo) {
         const proxy: ts.LanguageService = Object.create(null);
         for (let k of Object.keys(info.languageService) as Array<keyof ts.LanguageService>) {
             const x = info.languageService[k];
@@ -29,13 +37,32 @@ function init(modules: {typescript: typeof ts_module}) {
                 return (x as any).apply(info.languageService, args);
             };
         }
-        function typeToString(type: ts.Type, checker: ts.TypeChecker): string {
-            if (type !== type.getNonNullableType())
+        const usedImports = {maybe: false, union: false};
+        function typeToString(type: ts.Type | undefined, checker: ts.TypeChecker, insertTypename = false): string {
+            if (!type) return '{}';
+            if (type !== type.getNonNullableType()) {
+                usedImports.maybe = true;
                 return names.maybeName + '(' + typeToString(type.getNonNullableType(), checker) + ')';
+            }
+            if (type.isUnion()) {
+                usedImports.union = true;
+                return (
+                    names.unionName +
+                    `({} as ${checker.typeToString(type)}, ${type.types
+                        .map(t => typeToString(t, checker, true))
+                        .join(', ')})`
+                );
+            }
             if (type.flags & ts.TypeFlags.NumberLike) return '0';
             if (type.flags & ts.TypeFlags.StringLike) return "''";
             if (type.flags & ts.TypeFlags.BooleanLike) return 'true';
-            if (checker.isArrayLikeType(type)) return `[{}]`;
+            if (checker.isArrayLikeType(type))
+                return `[${typeToString(type.typeArguments && type.typeArguments[0], checker)}]`;
+            if (insertTypename) {
+                const typenameNode = getSymbolDeclaration(type.getProperty('__typename'));
+                const typenameType = typenameNode && checker.getTypeAtLocation(typenameNode);
+                if (typenameType && typenameType.isStringLiteral()) return `{__typename: "${typenameType.value}"}`;
+            }
             return '{}';
         }
         function getInfo(fileName: string, position: number, prop?: string) {
@@ -59,12 +86,6 @@ function init(modules: {typescript: typeof ts_module}) {
                 propName: undefined,
                 propType: undefined,
             };
-            function getTypeDeclaration(type: ts.Type | undefined) {
-                return type && getSymbolDeclaration(type.symbol);
-            }
-            function getSymbolDeclaration(symbol: ts.Symbol | undefined) {
-                return symbol && symbol.declarations && symbol.declarations.length > 0 && symbol.declarations[0];
-            }
 
             if (sourceFile) {
                 const token = ts.getTokenAtPosition(sourceFile, position);
@@ -73,22 +94,45 @@ function init(modules: {typescript: typeof ts_module}) {
                     result.access = access;
                     const propName = prop || access.name.text;
                     result.propName = propName;
-                    const exprType = checker.getTypeAtLocation(access.expression);
-                    const nonNullType = exprType && exprType.getNonNullableType();
-                    const queryObject = getTypeDeclaration(nonNullType);
+                    const exprNonNullType = checker.getTypeAtLocation(access.expression).getNonNullableType();
+                    const queryObject = getTypeDeclaration(exprNonNullType);
                     if (queryObject && ts.isObjectLiteralExpression(queryObject) && queryObject.parent) {
+                        let typenameValue = '';
+                        for (let i = 0; i < queryObject.properties.length; i++) {
+                            const prop = queryObject.properties[i];
+                            if (
+                                ts.isPropertyAssignment(prop) &&
+                                ts.isIdentifier(prop.name) &&
+                                prop.name.text === '__typename' &&
+                                ts.isStringLiteral(prop.initializer)
+                            ) {
+                                typenameValue = prop.initializer.text;
+                                break;
+                            }
+                        }
                         result.queryObject = queryObject;
-                        const type = checker.getContextualType(
-                            ts.isCallExpression(queryObject.parent) &&
-                                ts.isObjectLiteralExpression(queryObject.parent.parent)
-                                ? queryObject.parent
-                                : queryObject,
-                        );
+                        const type =
+                            checker.getContextualType(queryObject) ||
+                            checker.getContextualType(
+                                ts.isCallExpression(queryObject.parent) &&
+                                    ts.isObjectLiteralExpression(queryObject.parent.parent)
+                                    ? queryObject.parent
+                                    : queryObject,
+                            );
                         const nonNullType = type && type.getNonNullableType();
                         if (nonNullType && nonNullType.isUnion()) {
-                            const originalInterfaceType = nonNullType.types.find(
-                                t => getTypeDeclaration(t) !== queryObject,
-                            );
+                            const originalInterfaceType = nonNullType.types.find(t => {
+                                if (typenameValue === '') {
+                                    return getTypeDeclaration(t) !== queryObject;
+                                }
+                                const typenameNode = getSymbolDeclaration(t.getProperty('__typename'));
+                                const typenameType = typenameNode && checker.getTypeAtLocation(typenameNode);
+                                return Boolean(
+                                    typenameType &&
+                                        typenameType.isStringLiteral() &&
+                                        typenameType.value === typenameValue,
+                                );
+                            });
                             result.originalInterfaceType = originalInterfaceType;
                             if (originalInterfaceType) {
                                 const identDeclaration = getSymbolDeclaration(
@@ -145,20 +189,8 @@ function init(modules: {typescript: typeof ts_module}) {
                 );
                 if (propExists) return res;
 
-                const insertMaybe = propType !== propType.getNonNullableType();
-                const hasImportedMaybe = queryObject
-                    .getSourceFile()
-                    .statements.some(st =>
-                        Boolean(
-                            ts.isImportDeclaration(st) &&
-                                ts.isStringLiteral(st.moduleSpecifier) &&
-                                st.moduleSpecifier.text === names.libName &&
-                                st.importClause &&
-                                st.importClause.namedBindings &&
-                                ts.isNamedImports(st.importClause.namedBindings) &&
-                                st.importClause.namedBindings.elements.some(el => el.name.text === names.maybeName),
-                        ),
-                    );
+                const hasImportedMaybe = hasImport(queryObject.getSourceFile(), names.libName, names.maybeName);
+                const hasImportedUnion = hasImport(queryObject.getSourceFile(), names.libName, names.unionName);
                 return {
                     name: propName,
                     kind: ts.ScriptElementKind.interfaceElement,
@@ -173,10 +205,21 @@ function init(modules: {typescript: typeof ts_module}) {
                                 {
                                     fileName: queryObject.getSourceFile().fileName,
                                     textChanges: [
-                                        ...(insertMaybe && !hasImportedMaybe
+                                        ...(usedImports.maybe && !hasImportedMaybe
                                             ? [
                                                   {
                                                       newText: `import {maybe} from '${names.libName}';\n`,
+                                                      span: {
+                                                          start: 0,
+                                                          length: 0,
+                                                      },
+                                                  },
+                                              ]
+                                            : []),
+                                        ...(usedImports.union && !hasImportedUnion
+                                            ? [
+                                                  {
+                                                      newText: `import {union} from '${names.libName}';\n`,
                                                       span: {
                                                           start: 0,
                                                           length: 0,
@@ -237,3 +280,17 @@ function init(modules: {typescript: typeof ts_module}) {
 }
 
 export = init;
+
+function hasImport(sourceFile: ts.SourceFile, module: string, element: string) {
+    return sourceFile.statements.some(st =>
+        Boolean(
+            ts.isImportDeclaration(st) &&
+                ts.isStringLiteral(st.moduleSpecifier) &&
+                st.moduleSpecifier.text === module &&
+                st.importClause &&
+                st.importClause.namedBindings &&
+                ts.isNamedImports(st.importClause.namedBindings) &&
+                st.importClause.namedBindings.elements.some(el => el.name.text === element),
+        ),
+    );
+}

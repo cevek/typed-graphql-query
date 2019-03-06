@@ -1,5 +1,4 @@
 import * as ts from 'typescript';
-import {names} from './names';
 
 declare module 'typescript' {
     function getTokenAtPosition(sf: ts.SourceFile, position: number): ts.Node;
@@ -22,64 +21,62 @@ export function findUnusedProps(program: ts.Program, files: ts.SourceFile[]) {
     const res: ts.Identifier[] = [];
 
     function visitor(node: ts.Node) {
-        if (ts.isCallExpression(node) && node.arguments && node.arguments.length === 2) {
-            const arg = node.arguments[1];
-            if (ts.isObjectLiteralExpression(node.arguments[0]) && ts.isObjectLiteralExpression(arg)) {
-                const signature = checker.getResolvedSignature(node);
-                if (
-                    signature &&
-                    signature.declaration &&
-                    ts.isFunctionLike(signature.declaration) &&
-                    signature.declaration.typeParameters &&
-                    signature.declaration.typeParameters.length === 1
-                ) {
-                    const constraint = signature.declaration.typeParameters[0].constraint;
+        if (ts.isCallExpression(node) && node.arguments) {
+            if (node.arguments.length === 2) {
+                const arg = node.arguments[1];
+                if (ts.isObjectLiteralExpression(node.arguments[0]) && ts.isObjectLiteralExpression(arg)) {
+                    const signature = checker.getResolvedSignature(node);
                     if (
-                        constraint &&
-                        ts.isTypeReferenceNode(constraint) &&
-                        ts.isIdentifier(constraint.typeName) &&
-                        constraint.typeName.text === names.constraintName
+                        signature &&
+                        signature.declaration &&
+                        ts.isFunctionLike(signature.declaration) &&
+                        signature.declaration.typeParameters &&
+                        signature.declaration.typeParameters.length === 1
                     ) {
-                        const nodeSourceFile = node.getSourceFile();
-                        arg.properties.forEach(prop => {
-                            if (!prop.name) return;
-                            if (!ts.isIdentifier(prop.name)) return;
-                            const refSymbols = ts.FindAllReferences.findReferencedSymbols(
-                                program,
-                                {isCancellationRequested: () => false, throwIfCancellationRequested() {}},
-                                program.getSourceFiles(),
-                                nodeSourceFile,
-                                prop.name.getStart(),
-                            );
-                            if (refSymbols) {
-                                const hasUsage = refSymbols.some(refSymbol => {
-                                    return refSymbol.references.some(ref => {
-                                        // if (ref.isDefinition || ref.isInString) return;
-                                        if (ref.textSpan.start === prop.pos) return false;
-                                        const sourceFile = program.getSourceFile(ref.fileName);
-                                        if (sourceFile) {
-                                            const token = ts.getTokenAtPosition(sourceFile, ref.textSpan.start);
-                                            return (
-                                                token &&
-                                                token.parent &&
-                                                ts.isIdentifier(token) &&
-                                                ts.isPropertyAccessExpression(token.parent)
-                                            );
-                                        }
-                                        return false;
-                                    });
-                                });
-                                if (!hasUsage) {
-                                    if (res.includes(prop.name)) return;
-                                    res.push(prop.name);
-                                }
-                            }
-                        });
+                        handleObject(arg);
                     }
                 }
             }
         }
         ts.forEachChild(node, visitor);
+
+        function handleObject(obj: ts.ObjectLiteralExpression) {
+            const nodeSourceFile = node.getSourceFile();
+            obj.properties.forEach(prop => {
+                if (!prop.name) return;
+                if (!ts.isIdentifier(prop.name)) return;
+                const refSymbols = ts.FindAllReferences.findReferencedSymbols(
+                    program,
+                    {isCancellationRequested: () => false, throwIfCancellationRequested() {}},
+                    program.getSourceFiles(),
+                    nodeSourceFile,
+                    prop.name.getStart(),
+                );
+                if (refSymbols) {
+                    const hasUsage = refSymbols.some(refSymbol => {
+                        return refSymbol.references.some(ref => {
+                            // if (ref.isDefinition || ref.isInString) return;
+                            if (ref.textSpan.start === prop.pos) return false;
+                            const sourceFile = program.getSourceFile(ref.fileName);
+                            if (sourceFile) {
+                                const token = ts.getTokenAtPosition(sourceFile, ref.textSpan.start);
+                                return (
+                                    token &&
+                                    token.parent &&
+                                    ts.isIdentifier(token) &&
+                                    ts.isPropertyAccessExpression(token.parent)
+                                );
+                            }
+                            return false;
+                        });
+                    });
+                    if (!hasUsage) {
+                        if (res.includes(prop.name)) return;
+                        res.push(prop.name);
+                    }
+                }
+            });
+        }
     }
     files.forEach(file => {
         if (file.isDeclarationFile) return;

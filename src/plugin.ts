@@ -61,6 +61,12 @@ function init(modules: {}) {
             if (type.flags & ts.TypeFlags.BooleanLike) return 'true';
             if (checker.isArrayLikeType(type))
                 return `[${typeToString(type.typeArguments && type.typeArguments[0], checker)}]`;
+            const signatures = checker.getSignaturesOfType(type, ts.SignatureKind.Call);
+            if (signatures.length > 0) {
+                const signature = signatures[0];
+                return typeToString(signature.getReturnType(), checker);
+            }
+
             return '{}';
         }
         function getInfo(fileName: string, position: number, prop?: string) {
@@ -69,6 +75,7 @@ function init(modules: {}) {
             const sourceFile = program.getSourceFile(fileName);
             const result: {
                 propName?: string;
+                propSymbol?: ts.Symbol;
                 propType?: ts.Type;
                 checker: ts.TypeChecker;
                 sourceFile?: ts.SourceFile;
@@ -123,6 +130,7 @@ function init(modules: {}) {
                                 );
                                 if (identDeclaration) {
                                     result.propType = checker.getTypeAtLocation(identDeclaration);
+                                    result.propSymbol = originalInterfaceType.getProperty(propName);
                                 }
                             }
                         }
@@ -135,14 +143,22 @@ function init(modules: {}) {
         proxy.getSemanticDiagnostics = fileName => {
             const res = info.languageService.getSemanticDiagnostics(fileName);
             const program = info.project.getLanguageService().getProgram()!;
-            const unusedIdents = findUnusedProps(program, [program.getSourceFile(fileName)!]);
+            const {unusedProps, excessProps} = findUnusedProps(program, [program.getSourceFile(fileName)!]);
             return [
                 ...res,
-                ...unusedIdents.map<ts.Diagnostic>(ident => ({
+                ...unusedProps.map<ts.Diagnostic>(ident => ({
                     category: ts.DiagnosticCategory.Warning,
                     code: 0,
                     file: ident.getSourceFile(),
                     messageText: `Unused property "${ident.getText()}"`,
+                    start: ident.getStart(),
+                    length: ident.getEnd() - ident.getStart(),
+                })),
+                ...excessProps.map<ts.Diagnostic>(ident => ({
+                    category: ts.DiagnosticCategory.Error,
+                    code: 0,
+                    file: ident.getSourceFile(),
+                    messageText: `Property "${ident.getText()}" doesn't exist`,
                     start: ident.getStart(),
                     length: ident.getEnd() - ident.getStart(),
                 })),
@@ -158,7 +174,13 @@ function init(modules: {}) {
                 source,
                 preferences,
             );
-            const {propName, propType, queryObject, checker} = getInfo(fileName, position - 1, name);
+            const {propName, propSymbol, propType, queryObject, checker} = getInfo(fileName, position - 1, name);
+            function getDocumentation(symbol: ts.Symbol | undefined) {
+                if (symbol) {
+                    const doc = symbol.getDocumentationComment(checker).pop();
+                    if (doc) return doc.text;
+                }
+            }
             if (propName && queryObject && propType) {
                 const hasOtherProps = queryObject.properties.length > 0;
                 const start = hasOtherProps
@@ -170,11 +192,19 @@ function init(modules: {}) {
                 );
                 if (propExists) return res;
 
+                const doc = getDocumentation(propSymbol);
                 return {
                     name: propName,
                     kind: ts.ScriptElementKind.interfaceElement,
                     kindModifiers: '',
-                    displayParts: [{kind: 'text', text: 'Auto insert to graphql query definition'}],
+                    displayParts: [
+                        {
+                            kind: 'text',
+                            text: `Auto insert to graphql query definition\n(property) ${propName}: ${checker.typeToString(
+                                propType,
+                            )}${doc ? `\n\n${doc}` : ''}`,
+                        },
+                    ],
 
                     codeActions: [
                         {

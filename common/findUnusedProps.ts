@@ -17,10 +17,13 @@ declare module 'typescript' {
 }
 
 const QueryType = 'Query';
+const onProp = 'on';
+const argsProp = '__args';
 
 export function findUnusedProps(program: ts.Program, files: ts.SourceFile[]) {
     const checker = program.getTypeChecker();
-    const res: ts.Identifier[] = [];
+    const unusedProps: ts.Identifier[] = [];
+    const excessProps: ts.Identifier[] = [];
 
     function visitor(node: ts.Node) {
         if (ts.isCallExpression(node) && node.arguments) {
@@ -43,8 +46,8 @@ export function findUnusedProps(program: ts.Program, files: ts.SourceFile[]) {
         }
         ts.forEachChild(node, visitor);
 
-        function handleRefs(refSymbols: ts.ReferencedSymbol[], propName: ts.Identifier, propPos: number) {
-            if (refSymbols.length === 1 && refSymbols[0].references.length === 1) return;
+        function handleRefs(refSymbols: ts.ReferencedSymbol[], propName: ts.Identifier, propPos: number, skipUnused: boolean) {
+            // if (refSymbols.length === 1 && refSymbols[0].references.length === 1) return;
             const allRefs: ts.ReferenceEntry[] = [];
             const hasUsage = refSymbols.some(refSymbol => {
                 const filteredRefs = refSymbol.references.filter(ref => {
@@ -67,17 +70,42 @@ export function findUnusedProps(program: ts.Program, files: ts.SourceFile[]) {
                     return false;
                 });
             });
-            if (!hasUsage && allRefs.length > 0) {
-                if (res.includes(propName)) return;
-                res.push(propName);
+            if (!hasUsage && allRefs.length > 0 && !skipUnused) {
+                if (!unusedProps.includes(propName)) {
+                    unusedProps.push(propName);
+                }
+            }
+            if (allRefs.length === 0) {
+                if (!excessProps.includes(propName)) {
+                    excessProps.push(propName);
+                }
             }
         }
-        function handleObject(obj: ts.ObjectLiteralExpression) {
+        function handleObject(node: ts.Expression, skipUnused = false) {
+            if (ts.isArrayLiteralExpression(node) && node.elements.length > 0) node = node.elements[0];
+            if (!ts.isObjectLiteralExpression(node)) return;
+            const obj = node;
             const nodeSourceFile = node.getSourceFile();
             obj.properties.forEach(prop => {
                 if (!prop.name) return;
                 if (!ts.isPropertyAssignment(prop)) return;
                 if (!ts.isIdentifier(prop.name)) return;
+                if (prop.name.text === argsProp) {
+                    handleObject(prop.initializer, true);
+                    return;
+                }
+                if (prop.name.text === onProp) {
+                    if (ts.isObjectLiteralExpression(prop.initializer)) {
+                        const onObj = prop.initializer;
+                        onObj.properties.forEach(typeProp => {
+                            if (ts.isPropertyAssignment(typeProp)) {
+                                handleObject(typeProp.initializer);
+                            }
+                        });
+                    }
+                    return;
+                }
+
                 const refSymbols = ts.FindAllReferences.findReferencedSymbols(
                     program,
                     {isCancellationRequested: () => false, throwIfCancellationRequested() {}},
@@ -86,15 +114,9 @@ export function findUnusedProps(program: ts.Program, files: ts.SourceFile[]) {
                     prop.name.getStart(),
                 );
                 if (refSymbols) {
-                    handleRefs(refSymbols, prop.name, prop.pos);
+                    handleRefs(refSymbols, prop.name, prop.getStart(), skipUnused);
                 }
-                let initializer = prop.initializer;
-                if (ts.isArrayLiteralExpression(prop.initializer)) {
-                    initializer = prop.initializer.elements[0];
-                }
-                if (initializer && ts.isObjectLiteralExpression(initializer)) {
-                    handleObject(initializer);
-                }
+                handleObject(prop.initializer);
             });
         }
     }
@@ -102,5 +124,5 @@ export function findUnusedProps(program: ts.Program, files: ts.SourceFile[]) {
         if (file.isDeclarationFile) return;
         visitor(file);
     });
-    return res;
+    return {unusedProps, excessProps};
 }

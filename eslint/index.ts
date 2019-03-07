@@ -20,11 +20,21 @@ const rule: Rule.RuleModule = {
                 const tsNodeToESTreeNodeMap: WeakMap<ts.Node, ESTree.Node> =
                     context.parserServices.esTreeNodeToTSNodeMap;
                 const sourceFile = esTreeNodeToTSNodeMap.get(node) as ts.SourceFile;
-                const idents = findUnusedProps(program, [sourceFile]);
-                idents.forEach(ident => {
+                const {unusedProps, excessProps} = findUnusedProps(program, [sourceFile]);
+                unusedProps.forEach(ident => {
                     const sourceFile = ident.getSourceFile();
                     context.report({
                         message: `Unused prop "${ident.getText()}"`,
+                        loc: {
+                            start: loc(sourceFile, ident.getStart()),
+                            end: loc(sourceFile, ident.getEnd()),
+                        },
+                    });
+                });
+                excessProps.forEach(ident => {
+                    const sourceFile = ident.getSourceFile();
+                    context.report({
+                        message: `Property "${ident.getText()}" doesn't exist`,
                         loc: {
                             start: loc(sourceFile, ident.getStart()),
                             end: loc(sourceFile, ident.getEnd()),

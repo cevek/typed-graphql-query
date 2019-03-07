@@ -92,6 +92,33 @@ function init(modules: {}) {
                 propType: undefined,
             };
 
+            function getOriginalType(type: ts.Type) {
+                if (type.isIntersection()) type = type.types[0];
+                if (type.aliasSymbol && type.aliasSymbol.escapedName === 'Result' && type.aliasTypeArguments) {
+                    let subType = type.aliasTypeArguments[0];
+                    if (subType.isIntersection()) subType = subType.types[0];
+                    if (
+                        subType &&
+                        subType.aliasSymbol &&
+                        subType.aliasSymbol.escapedName === 'TransformEntity' &&
+                        subType.aliasTypeArguments
+                    ) {
+                        return subType.aliasTypeArguments[0];
+                    }
+                }
+            }
+            function getDeclaredType(type: ts.Type) {
+                if (type.isIntersection()) type = type.types[0];
+                if (
+                    type.aliasSymbol &&
+                    type.aliasSymbol.escapedName === 'Result' &&
+                    type.aliasTypeArguments &&
+                    type.aliasTypeArguments.length === 1
+                ) {
+                    return type.aliasTypeArguments[0];
+                }
+            }
+
             if (sourceFile) {
                 const token = ts.getTokenAtPosition(sourceFile, position);
                 const access = token.parent;
@@ -103,35 +130,35 @@ function init(modules: {}) {
                     if (accessExprType.isIntersection()) {
                         accessExprType = accessExprType.types[0];
                     }
-                    const queryObject = getTypeDeclaration(
-                        (accessExprType.aliasTypeArguments && accessExprType.aliasTypeArguments[0]) || accessExprType,
-                    );
-                    if (queryObject && ts.isObjectLiteralExpression(queryObject) && queryObject.parent) {
-                        result.queryObject = queryObject;
-                        const type =
-                            checker.getContextualType(queryObject) ||
-                            checker.getContextualType(
-                                ts.isCallExpression(queryObject.parent) &&
-                                    ts.isObjectLiteralExpression(queryObject.parent.parent)
-                                    ? queryObject.parent
-                                    : queryObject,
+
+                    let originalType;
+                    let declaredType;
+                    if (accessExprType.isUnion() && accessExprType.types.length === 2) {
+                        originalType = getOriginalType(accessExprType.types[0]);
+                        declaredType = getDeclaredType(accessExprType.types[1]);
+                    }
+                    if (!accessExprType.isUnion()) {
+                        declaredType = getDeclaredType(accessExprType);
+                        const queryObject = getTypeDeclaration(declaredType);
+                        if (queryObject && ts.isObjectLiteralExpression(queryObject)) {
+                            const ctxType = checker.getContextualType(queryObject);
+                            if (ctxType && ctxType.isUnion() && ctxType.types.length === 2) {
+                                originalType = ctxType.types[0];
+                            }
+                        }
+                    }
+
+                    if (declaredType && originalType) {
+                        const queryObject = getTypeDeclaration(declaredType);
+                        if (queryObject && ts.isObjectLiteralExpression(queryObject) && queryObject.parent) {
+                            result.queryObject = queryObject;
+                            result.originalInterfaceType = originalType;
+                            const identDeclaration = getSymbolDeclaration(
+                                originalType.getProperties().find(symbol => symbol.escapedName === propName),
                             );
-                        const nonNullType = type && type.getNonNullableType();
-                        if (nonNullType && nonNullType.isUnion()) {
-                            const originalInterfaceType = nonNullType.types.find(
-                                t => getTypeDeclaration(t) !== queryObject,
-                            );
-                            result.originalInterfaceType = originalInterfaceType;
-                            if (originalInterfaceType) {
-                                const identDeclaration = getSymbolDeclaration(
-                                    originalInterfaceType
-                                        .getProperties()
-                                        .find(symbol => symbol.escapedName === propName),
-                                );
-                                if (identDeclaration) {
-                                    result.propType = checker.getTypeAtLocation(identDeclaration);
-                                    result.propSymbol = originalInterfaceType.getProperty(propName);
-                                }
+                            if (identDeclaration) {
+                                result.propType = checker.getTypeAtLocation(identDeclaration);
+                                result.propSymbol = originalType.getProperty(propName);
                             }
                         }
                     }

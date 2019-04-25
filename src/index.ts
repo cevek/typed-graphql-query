@@ -1,18 +1,39 @@
 export type TransformMethods<T> = {
     [K in keyof T]: T[K] extends (args: infer Args) => infer Entity
-        ? <Query>(args: Args, query: Query | TransformEntity<Entity>) => Result<Query | TransformEntity<Entity>>
+        ? <Query extends DeepPartial<TransformEntity<Entity>>>(
+              args: Args,
+              query: Query | TransformEntity<Entity>,
+          ) => Result<Query | TransformEntity<Entity>>
         : never
 };
+type DeepPartial<T> = {[P in keyof T]?: DeepPartial<T[P]>};
 
-export function graphqlFactory<Root extends object>(fetchGraphqlQuery: (query: string) => {}): TransformMethods<Root> {
+function argToQuery(arg: unknown, wrapObjWithCurly: boolean): string {
+    if (typeof arg === 'object' && arg !== null) {
+        if (arg instanceof Array) {
+            return `[${arg.map(a => argToQuery(a, true)).join(',')}]`;
+        }
+        const objVals = [];
+        for (const k in arg) {
+            objVals.push(`${k}: ${argToQuery(arg[k as never], true)}`);
+        }
+        if (wrapObjWithCurly) return `{${objVals.join(',')}}`;
+        return objVals.join(',');
+    }
+    return JSON.stringify(arg);
+}
+
+export function graphqlFactory<Root extends object>(
+    fetchGraphqlQuery: (query: string, prop: string) => {},
+): TransformMethods<Root> {
     const obj = {} as Root;
     return new Proxy(obj, {
         get(target: any, prop) {
             const fn = target[prop];
             if (fn) return fn;
-            target[prop] = (query: {}) => {
-                const queryS = toGraphQLQuery({[prop]: query});
-                return (fetchGraphqlQuery(queryS) as any)[prop];
+            target[prop] = (args: {}, query: {}) => {
+                const queryS = toGraphQLQuery({[prop]: {...query, __args: args}});
+                return fetchGraphqlQuery(queryS, prop as string) as any;
             };
             return target[prop];
         },
@@ -24,17 +45,13 @@ export function toGraphQLQuery(query: any): string {
     if (typeof query === 'object' && query !== null) {
         if (query instanceof Array) return toGraphQLQuery(query[0]);
         if (query.__args) {
-            s += '(';
-            for (const arg in query.__args) {
-                s += `${arg}:${JSON.stringify(query.__args[arg])}`;
-            }
-            s += ')' + toGraphQLQuery(query.body);
-            return s;
+            s += `(${argToQuery(query.__args, false)})`;
         }
         s += `{`;
         let i = 0;
         for (const key in query) {
             const val = query[key];
+            if (key === '__args') continue;
             if (key === '__on') {
                 for (const typeName in val) {
                     s += `...on ${typeName}${toGraphQLQuery(val[typeName])}`;

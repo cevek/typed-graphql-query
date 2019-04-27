@@ -1,9 +1,12 @@
+type Primitive = boolean | number | string | Date;
 export type TransformMethods<T> = {
     [K in keyof T]: T[K] extends (args: infer Args) => infer Entity
-        ? <Query extends DeepPartial<TransformEntity<Entity>>>(
-              args: Args,
-              query: Query | TransformEntity<Entity>,
-          ) => Result<Query | TransformEntity<Entity>>
+        ? Entity extends Primitive
+            ? (args: Args) => Entity
+            : <Query extends DeepPartial<TransformEntity<Entity>>>(
+                  args: Args,
+                  query: Query | TransformEntity<Entity>,
+              ) => Result<TransformEntity<Entity>>
         : never
 };
 type DeepPartial<T> = {[P in keyof T]?: DeepPartial<T[P]>};
@@ -17,6 +20,7 @@ function argToQuery(arg: unknown, wrapObjWithCurly: boolean): string {
         for (const k in arg) {
             objVals.push(`${k}: ${argToQuery(arg[k as never], true)}`);
         }
+        if (objVals.length === 0) throw new Error(`Graphql argument cannot be empty object`);
         if (wrapObjWithCurly) return `{${objVals.join(',')}}`;
         return objVals.join(',');
     }
@@ -61,6 +65,7 @@ export function toGraphQLQuery(query: any): string {
             s += `${i > 0 ? ',' : ''}${key}${toGraphQLQuery(val)}`;
             i++;
         }
+        if (i === 0) throw new Error(`Graphql query cannot be empty object`);
         s += `}`;
     }
     return s;

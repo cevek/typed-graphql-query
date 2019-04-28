@@ -1,72 +1,86 @@
 type Primitive = boolean | number | string | Date;
 export type TransformMethods<T> = {
     [K in keyof T]: T[K] extends (args: infer Args) => infer Entity
-        ? Entity extends Primitive
+        ? [Entity] extends [Primitive]
             ? (args: Args) => Entity
-            : <Query extends DeepPartial<TransformEntity<Entity>>>(
+            : <Q extends DeepPartial<TransformEntity<NonNullable<Entity>>>>(
                   args: Args,
-                  query: Query | TransformEntity<Entity>,
+                  query: Q | TransformEntity<NonNullable<Entity>>,
               ) => Result<TransformEntity<Entity>>
         : never
 };
 type DeepPartial<T> = {[P in keyof T]?: DeepPartial<T[P]>};
 
-function argToQuery(arg: unknown, wrapObjWithCurly: boolean): string {
-    if (typeof arg === 'object' && arg !== null) {
-        if (arg instanceof Array) {
-            return `[${arg.map(a => argToQuery(a, true)).join(',')}]`;
-        }
-        const objVals = [];
-        for (const k in arg) {
-            objVals.push(`${k}: ${argToQuery(arg[k as never], true)}`);
-        }
-        if (objVals.length === 0) throw new Error(`Graphql argument cannot be empty object`);
-        if (wrapObjWithCurly) return `{${objVals.join(',')}}`;
-        return objVals.join(',');
+export function graphqlFactory<Query extends object, Mutation extends object>(
+    fetchGraphqlQuery: (query: string, prop: string) => {},
+) {
+    const res = {query: {} as TransformMethods<Query>, mutation: {} as TransformMethods<Mutation>};
+    for (const type of ['query', 'mutation'] as (keyof typeof res)[]) {
+        res[type] = new Proxy(
+            {},
+            {
+                get(target: any, prop) {
+                    const fn = target[prop];
+                    if (fn) return fn;
+                    target[prop] = (args: {}, query: {}) => {
+                        const queryS = type + toGraphQLQuery({[prop]: {...query, __args: args}});
+                        return fetchGraphqlQuery(queryS, prop as string) as unknown;
+                    };
+                    return target[prop];
+                },
+            },
+        );
     }
-    return JSON.stringify(arg);
+    return res;
 }
 
-export function graphqlFactory<Root extends object>(
-    fetchGraphqlQuery: (query: string, prop: string) => {},
-): TransformMethods<Root> {
-    const obj = {} as Root;
-    return new Proxy(obj, {
-        get(target: any, prop) {
-            const fn = target[prop];
-            if (fn) return fn;
-            target[prop] = (args: {}, query: {}) => {
-                const queryS = toGraphQLQuery({[prop]: {...query, __args: args}});
-                return fetchGraphqlQuery(queryS, prop as string) as any;
-            };
-            return target[prop];
-        },
-    });
+function error(str: string, json: object) {
+    const error = new Error(str);
+    (error as {json?: object}).json = json;
+    return error;
 }
 
 export function toGraphQLQuery(query: any): string {
+    function argToQuery(arg: unknown, wrapObjWithCurly: boolean): string {
+        if (typeof arg === 'object' && arg !== null) {
+            if (arg instanceof Array) {
+                return `[${arg.map(a => argToQuery(a, true)).join(',')}]`;
+            }
+            if (arg instanceof Date) {
+                return JSON.stringify(arg);
+            }
+            const objVals = [];
+            for (const k in arg) {
+                objVals.push(`${k}:${argToQuery(arg[k as never], true)}`);
+            }
+            if (objVals.length === 0) throw error(`Graphql argument cannot be empty object`, {query, arg});
+            if (wrapObjWithCurly) return `{${objVals.join(',')}}`;
+            return objVals.join(',');
+        }
+        return JSON.stringify(arg);
+    }
+
     let s = '';
     if (typeof query === 'object' && query !== null) {
         if (query instanceof Array) return toGraphQLQuery(query[0]);
         if (query.__args) {
             s += `(${argToQuery(query.__args, false)})`;
         }
-        s += `{`;
         let i = 0;
+        let sub = '';
         for (const key in query) {
             const val = query[key];
             if (key === '__args') continue;
             if (key === '__on') {
                 for (const typeName in val) {
-                    s += `...on ${typeName}${toGraphQLQuery(val[typeName])}`;
+                    sub += `...on ${typeName}${toGraphQLQuery(val[typeName])}`;
                 }
                 continue;
             }
-            s += `${i > 0 ? ',' : ''}${key}${toGraphQLQuery(val)}`;
+            sub += `${i > 0 ? ',' : ''}${key}${toGraphQLQuery(val)}`;
             i++;
         }
-        if (i === 0) throw new Error(`Graphql query cannot be empty object`);
-        s += `}`;
+        if (sub.length > 0) s += `{${sub}}`;
     }
     return s;
 }

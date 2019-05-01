@@ -12,7 +12,7 @@ export type TransformMethods<T> = {
 type DeepPartial<T> = {[P in keyof T]?: DeepPartial<T[P]>};
 
 export function graphqlFactory<Query extends object, Mutation extends object>(
-    fetchGraphqlQuery: (query: string, prop: string) => {},
+    fetchGraphqlQuery: (query: string, method: string, originQuery: object, type: 'query' | 'mutation') => {},
 ) {
     const res = {query: {} as TransformMethods<Query>, mutation: {} as TransformMethods<Mutation>};
     for (const type of ['query', 'mutation'] as (keyof typeof res)[]) {
@@ -23,8 +23,9 @@ export function graphqlFactory<Query extends object, Mutation extends object>(
                     const fn = target[prop];
                     if (fn) return fn;
                     target[prop] = (args: {}, query: {}) => {
-                        const queryS = type + toGraphQLQuery({[prop]: {...query, __args: args}});
-                        return fetchGraphqlQuery(queryS, prop as string) as unknown;
+                        const preparedQuery = {...query, __args: args};
+                        const queryS = type + toGraphQLQuery({[prop]: preparedQuery});
+                        return fetchGraphqlQuery(queryS, prop as string, preparedQuery, type) as unknown;
                     };
                     return target[prop];
                 },

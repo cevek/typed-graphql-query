@@ -6,7 +6,7 @@ export type TransformMethods<T> = {
             : <Q extends DeepPartial<TransformEntity<NonNullable<Entity>>>>(
                   args: Args,
                   query: Q | TransformEntity<NonNullable<Entity>>,
-              ) => Result<TransformEntity<Entity>>
+              ) => Result<TransformEntity<Q>>
         : never
 };
 type DeepPartial<T> = {[P in keyof T]?: DeepPartial<T[P]>};

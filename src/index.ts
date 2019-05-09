@@ -3,13 +3,22 @@ export type TransformMethods<T> = {
     [K in keyof T]: T[K] extends (args: infer Args) => infer Entity
         ? [Entity] extends [Primitive]
             ? (args: Args) => Entity
-            : <Q extends DeepPartial<TransformEntity<NonNullable<Entity>>>>(
-                  args: Args,
-                  query: Q | TransformEntity<NonNullable<Entity>>,
-              ) => Result<TransformEntity<Q>>
+            : <Q>(args: Args, query: Q | Expand<Entity>) => Merge<Entity, RollupToUnion<Q>>
         : never
 };
-type DeepPartial<T> = {[P in keyof T]?: DeepPartial<T[P]>};
+// type DeepPartial<T> = {[P in keyof T]?: DeepPartial<T[P]>};
+
+interface PickArray<A, B> extends Array<Merge<A, B>> {}
+type Merged<A, B, K extends keyof A> = {[P in K]: Merge<A[P], P extends keyof B ? B[P] : never>};
+type Merge<A, B> = A extends object
+    ? A extends Array<any>
+        ? B extends Array<any>
+            ? PickArray<A[number], B[number]>
+            : {}
+        : A extends Date
+        ? A
+        : Merged<A, B, Extract<keyof A, keyof B>>
+    : A;
 
 export function graphqlFactory<Query extends object, Mutation extends object>(
     fetchGraphqlQuery: (query: string, method: string, originQuery: object, type: 'query' | 'mutation') => {},
@@ -119,12 +128,12 @@ type IsUnion<T> = [T] extends [UnionToIntersection<T>] ? false : true;
 //     // ? (R extends Array<infer RR> ? (TransformEntity<RR> & {__args: Args})[] : TransformEntity<R>) // & {__args: Args}
 //     // : UnionToOn<T[P]>
 // };
-type TypenamesToIntersection<T> = T extends {__typename: string} ? {[P in T['__typename']]: TransformEntity<T>} : never;
+type TypenamesToIntersection<T> = T extends {__typename: string} ? {[P in T['__typename']]: Expand<T>} : never;
 type UnionToOn<T> = IsUnion<NonNullable<T>> extends true
     ? {on: UnionToIntersection<TypenamesToIntersection<T>>}
-    : TransformEntity<T>;
+    : Expand<T>;
 
-type TransformEntity<T> = {
+type Expand<T> = {
     [P in keyof T]: T[P] extends (args: infer _Args) => infer R
         ? [R] extends [Array<infer RR>]
             ? (UnionToOn<RR> & {__args: _Args})[]
@@ -132,9 +141,9 @@ type TransformEntity<T> = {
         : UnionToOn<T[P]>
 };
 
-type AddTypename<T> = {[P in keyof T]: Result<T[P]> & {__typename: P}}[keyof T];
-type OnToUnion<T> = T extends {on: infer On} ? AddTypename<On> : Result<T>;
-type Result<T> = {[P in keyof T]: OnToUnion<T[P]>};
+type AddTypename<T> = {[P in keyof T]: RollupToUnion<T[P]> & {__typename: P}}[keyof T];
+type OnToUnion<T> = T extends {on: infer On} ? AddTypename<On> : RollupToUnion<T>;
+type RollupToUnion<T> = {[P in keyof T]: OnToUnion<T[P]>};
 
 // type X = Result<{lastMessagesWithArg: {on: {Image: {height: number}}}[]} | TransformEntity<Product>>;
 // var x!: X;

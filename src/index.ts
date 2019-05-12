@@ -314,21 +314,6 @@ type RollupToUnion<T> = {[P in keyof T]: OnToUnion<T[P]>};
 // var f!: A | Entity;
 // f
 
-interface A {
-    a: number;
-    b: {
-        c?: {
-            d: {
-                id: 'Id';
-                x: number;
-            };
-        };
-    };
-    r: {f: 1}[];
-    p: {f: {u: {x: 1; y: 2}[]}}[];
-    date: Date;
-    date2: Date;
-}
 
 // interface PickArray<A, B> extends Array<Merge<A, B>> {}
 // type Merged<A, B, K extends keyof A> = {[P in K]: Merge<A[P], P extends keyof B ? B[P] : never>};
@@ -341,7 +326,6 @@ interface A {
 //         ? A
 //         : Merged<A, B, Extract<keyof A, keyof B>>
 //     : A;
-var x!: GetCommon<A, {a: 0; b: {c: {d: {id: 0; x: 0}}}; r: {f: 0}[]; p: {f: {u: {x: 0}[]}}[]; date: 0}>;
 
 // declare function query<T>(val: T | A): Merge<A, T>;
 
@@ -350,12 +334,31 @@ var x!: GetCommon<A, {a: 0; b: {c: {d: {id: 0; x: 0}}}; r: {f: 0}[]; p: {f: {u: 
 // var h!: TransformMethods<{getA(args: {}): A | null}>;
 // // h.getA({}, {a: 0})
 
-x.a;
-x.b;
-x.b.c;
-x.b.c!.d.x;
-x.b.c!.d.id;
-const g = x.r.map(v => v.f);
-x.r;
-x.date.getTime;
-x.p.map(v => v.f.u.map(g => g.x));
+
+
+
+// interface A {
+//     a: number;
+//     b: {
+//         c?: {
+//             d: {
+//                 id: 'Id';
+//                 x: number;
+//             };
+//         };
+//     };
+//     r: {f: 1}[];
+//     p: {f: {u: {x: 1; y: 2}[]}}[];
+//     date: Date;
+//     date2: Date;
+// }
+// var x!: GetCommon<A, {a: 0; b: {c: {d: {id: 0; x: 0}}}; r: {f: 0}[]; p: {f: {u: {x: 0}[]}}[]; date: 0}>;
+// x.a;
+// x.b;
+// x.b.c;
+// x.b.c!.d.x;
+// x.b.c!.d.id;
+// const g = x.r.map(v => v.f);
+// x.r;
+// x.date.getTime;
+// x.p.map(v => v.f.u.map(g => g.x));

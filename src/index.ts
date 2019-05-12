@@ -3,21 +3,20 @@ export type TransformMethods<T> = {
     [K in keyof T]: T[K] extends (args: infer Args) => infer Entity
         ? [Entity] extends [Primitive]
             ? (args: Args) => Entity
-            : <Q>(args: Args, query: Q | Expand<Entity>) => Merge<Entity, RollupToUnion<Q>>
+            : <Q>(args: Args, query: Q | Expand<Entity>) => GetCommon<Entity, RollupToUnion<Q>>
         : never
 };
 // type DeepPartial<T> = {[P in keyof T]?: DeepPartial<T[P]>};
 
-interface PickArray<A, B> extends Array<Merge<A, B>> {}
-type Merged<A, B, K extends keyof A> = {[P in K]: Merge<A[P], P extends keyof B ? B[P] : never>};
-type Merge<A, B> = A extends object
+type Common<A, B, K extends keyof A> = {[P in K]: GetCommon<A[P], P extends keyof B ? B[P] : never>};
+type GetCommon<A, B> = A extends object
     ? A extends Array<any>
         ? B extends Array<any>
-            ? PickArray<A[number], B[number]>
-            : {}
+            ? {[P in keyof A]: GetCommon<A[number], B[number]>} 
+            : never
         : A extends Date
         ? A
-        : Merged<A, B, Extract<keyof A, keyof B>>
+        : Common<A, B, Extract<keyof A, keyof B>>
     : A;
 
 export function graphqlFactory<Query extends object, Mutation extends object>(
@@ -314,3 +313,49 @@ type RollupToUnion<T> = {[P in keyof T]: OnToUnion<T[P]>};
 // type Entity = {a: number; b: number; c: {c1: number; c2: number}};
 // var f!: A | Entity;
 // f
+
+interface A {
+    a: number;
+    b: {
+        c?: {
+            d: {
+                id: 'Id';
+                x: number;
+            };
+        };
+    };
+    r: {f: 1}[];
+    p: {f: {u: {x: 1; y: 2}[]}}[];
+    date: Date;
+    date2: Date;
+}
+
+// interface PickArray<A, B> extends Array<Merge<A, B>> {}
+// type Merged<A, B, K extends keyof A> = {[P in K]: Merge<A[P], P extends keyof B ? B[P] : never>};
+// type Merge<A, B> = A extends object
+//     ? A extends Array<any>
+//         ? B extends Array<any>
+//             ? PickArray<A[number], B[number]>
+//             : {}
+//         : A extends Date
+//         ? A
+//         : Merged<A, B, Extract<keyof A, keyof B>>
+//     : A;
+var x!: GetCommon<A, {a: 0; b: {c: {d: {id: 0; x: 0}}}; r: {f: 0}[]; p: {f: {u: {x: 0}[]}}[]; date: 0}>;
+
+// declare function query<T>(val: T | A): Merge<A, T>;
+
+// // var res = query({a: 0, date: 0, p: [{f: {u: [{x: 0}]}}]}).p.map(v => v.f.u.map(v2 => v2.x));
+// import {TransformMethods} from 'typed-graphql-query';
+// var h!: TransformMethods<{getA(args: {}): A | null}>;
+// // h.getA({}, {a: 0})
+
+x.a;
+x.b;
+x.b.c;
+x.b.c!.d.x;
+x.b.c!.d.id;
+const g = x.r.map(v => v.f);
+x.r;
+x.date.getTime;
+x.p.map(v => v.f.u.map(g => g.x));
